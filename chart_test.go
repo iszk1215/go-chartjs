@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/brentp/go-chartjs/types"
+	"github.com/iszk1215/go-chartjs/types"
 )
 
 type xy struct {

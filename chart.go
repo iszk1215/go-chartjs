@@ -8,7 +8,7 @@ import (
 	"html/template"
 	"math"
 
-	"github.com/brentp/go-chartjs/types"
+	"github.com/iszk1215/go-chartjs/types"
 )
 
 var True = types.True
@@ -170,7 +170,7 @@ func (s shape) MarshalJSON() ([]byte, error) {
 
 // Dataset wraps the "dataset" JSON
 type Dataset struct {
-	Data            Values      `json:"-"`
+	Data            interface{} `json:"-"`
 	Type            chartType   `json:"type,omitempty"`
 	BackgroundColor *types.RGBA `json:"backgroundColor,omitempty"`
 	// BorderColor is the color of the line.
@@ -219,7 +219,16 @@ func (d Dataset) MarshalJSON() ([]byte, error) {
 		yf = YFloatFormat
 	}
 
-	o, err := marshalValuesJSON(d.Data, xf, yf)
+	var err error
+	var o []byte
+	if m, ok := d.Data.(json.Marshaler); ok {
+		o, err = m.MarshalJSON()
+	} else if v, ok := d.Data.(Values); ok {
+		o, err = marshalValuesJSON(v, xf, yf)
+	}
+	if err != nil {
+		return nil, err
+	}
 	// avoid recursion by creating an alias.
 	type alias Dataset
 	buf, err := json.Marshal(alias(d))
@@ -295,12 +304,17 @@ func (p axisPosition) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + axisPositions[p] + `"`), nil
 }
 
+type AxisTitle struct {
+	Display bool   `json:"display,omitempty"`
+	Text    string `json:"text,omitempty"`
+}
+
 // Axis corresponds to 'scale' in chart.js lingo.
 type Axis struct {
 	Type      axisType     `json:"type"`
 	Position  axisPosition `json:"position,omitempty"`
 	Label     string       `json:"label,omitempty"`
-	ID        string       `json:"id,omitempty"`
+	ID        string       `json:"-"`
 	GridLines types.Bool   `json:"gridLine,omitempty"`
 	Stacked   types.Bool   `json:"stacked,omitempty"`
 
@@ -308,6 +322,8 @@ type Axis struct {
 	Display    types.Bool  `json:"display,omitempty"`
 	ScaleLabel *ScaleLabel `json:"scaleLabel,omitempty"`
 	Tick       *Tick       `json:"ticks,omitempty"`
+
+	Title AxisTitle `json:"title,omitempty"`
 }
 
 // Tick lets us set the range of the data.
@@ -329,22 +345,6 @@ type ScaleLabel struct {
 	FontStyle   string      `json:"fontStyle,omitempty"`
 }
 
-// Axes holds the X and Y axies. Its simpler to use Chart.AddXAxis, Chart.AddYAxis.
-type Axes struct {
-	XAxes []Axis `json:"xAxes,omitempty"`
-	YAxes []Axis `json:"yAxes,omitempty"`
-}
-
-// AddX adds a X-Axis.
-func (a *Axes) AddX(x Axis) {
-	a.XAxes = append(a.XAxes, x)
-}
-
-// AddY adds a Y-Axis.
-func (a *Axes) AddY(y Axis) {
-	a.YAxes = append(a.YAxes, y)
-}
-
 // Option wraps the chartjs "option"
 type Option struct {
 	Responsive          types.Bool `json:"responsive,omitempty"`
@@ -358,12 +358,18 @@ type Title struct {
 	Text    string     `json:"text,omitempty"`
 }
 
+type Animation struct {
+	Duration int `json:"duration"`
+}
+
 // Options wraps the chartjs "options"
 type Options struct {
 	Option
-	Scales  Axes     `json:"scales,omitempty"`
-	Legend  *Legend  `json:"legend,omitempty"`
-	Tooltip *Tooltip `json:"tooltips,omitempty"`
+	Scales    map[string]Axis              `json:"scales,omitempty"`
+	Legend    *Legend                      `json:"legend,omitempty"`
+	Tooltip   *Tooltip                     `json:"tooltips,omitempty"`
+	Animation Animation                    `json:"animation,omitempty"`
+	Plugins   map[string]map[string]string `json:"plugins,omitempty"`
 }
 
 // Tooltip wraps chartjs "tooltips".
@@ -393,26 +399,34 @@ func (c *Chart) AddDataset(d Dataset) {
 	c.Data.Datasets = append(c.Data.Datasets, d)
 }
 
+func (c *Chart) AddAxis(axis Axis) {
+	if c.Options.Scales == nil {
+		c.Options.Scales = map[string]Axis{}
+	}
+	c.Options.Scales[axis.ID] = axis
+}
+
 // AddXAxis adds an x-axis to the chart and returns the ID of the added axis.
 func (c *Chart) AddXAxis(x Axis) (string, error) {
 	if x.ID == "" {
-		x.ID = fmt.Sprintf("xaxis%d", len(c.Options.Scales.XAxes))
+		x.ID = "x"
 	}
 	if x.Position == Left || x.Position == Right {
 		return "", fmt.Errorf("chart: added x-axis to left or right")
 	}
-	c.Options.Scales.XAxes = append(c.Options.Scales.XAxes, x)
+
+	c.AddAxis(x)
 	return x.ID, nil
 }
 
 // AddYAxis adds an y-axis to the chart and return the ID of the added axis.
 func (c *Chart) AddYAxis(y Axis) (string, error) {
 	if y.ID == "" {
-		y.ID = fmt.Sprintf("yaxis%d", len(c.Options.Scales.YAxes))
+		y.ID = "y"
 	}
 	if y.Position == Top || y.Position == Bottom {
 		return "", fmt.Errorf("chart: added y-axis to top or bottom")
 	}
-	c.Options.Scales.YAxes = append(c.Options.Scales.YAxes, y)
+	c.AddAxis(y)
 	return y.ID, nil
 }
